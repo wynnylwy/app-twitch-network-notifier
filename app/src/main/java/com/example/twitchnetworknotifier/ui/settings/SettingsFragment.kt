@@ -33,7 +33,7 @@ class SettingsFragment : Fragment() {
 
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                val settings = viewModel.settings.value
+                val settings = viewModel.loadSettingsOnce()
                 binding.editChannelName.setText(settings.channelName)
                 binding.editClientId.setText(settings.clientId)
                 binding.editClientSecret.setText(settings.clientSecret)
