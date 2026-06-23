@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cp /tmp/app_build_gradle_backup.kts app/build.gradle.kts)",
+      "Bash(cp /tmp/root_build_gradle_backup.kts build.gradle.kts)",
+      "Bash(cp /tmp/libs_versions_backup.toml gradle/libs.versions.toml)",
+      "Bash(./gradlew :app:compileDebugKotlin -q)",
+      "Bash(./gradlew :app:assembleDebug -q)",
+      "Bash(cp /tmp/app_build_gradle_backup3.kts /Users/wynnylwy/AndroidStudioProjects/app-twitch-network-notifier/app/build.gradle.kts *)"
+    ],
+    "additionalDirectories": [
+      "/private/tmp"
+    ]
+  }
+}
