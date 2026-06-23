@@ -58,4 +58,6 @@ dependencies {
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation("org.jetbrains.kotlin:kotlin-test:1.9.0")
+    debugImplementation(libs.androidx.fragment.testing)
+    androidTestImplementation(libs.androidx.espresso.contrib)
 }
