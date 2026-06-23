@@ -43,4 +43,15 @@
         libero vel nunc consequat, quis tincidunt nisl eleifend. Cras bibendum enim a justo luctus
         vestibulum. Fusce dictum libero quis erat maximus, vitae volutpat diam dignissim.
     </string>
+
+    <string name="notif_monitoring_channel_name">Monitoring</string>
+    <string name="notif_alerts_channel_name">Alerts</string>
+    <string name="notif_monitoring_active">Monitoring active</string>
+    <string name="notif_welcome">Welcome to Twitch Network Notifier, your live stream status is now being monitored.</string>
+    <string name="notif_offline">Your live stream is offline, please check.</string>
+    <string name="notif_connection_issue">Could not verify your stream status (connection issue).</string>
+    <string name="notif_back_live">Your streaming is live now.</string>
+    <string name="dialog_toggle_off_title">You sure to off monitoring?</string>
+    <string name="dialog_yes">Yes</string>
+    <string name="dialog_no">No</string>
 </resources>
