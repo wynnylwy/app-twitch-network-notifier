@@ -55,4 +55,5 @@ dependencies {
     testImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation("org.jetbrains.kotlin:kotlin-test:1.9.0")
 }
