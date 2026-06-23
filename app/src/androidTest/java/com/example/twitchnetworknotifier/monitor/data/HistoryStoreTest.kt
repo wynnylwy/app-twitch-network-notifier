@@ -6,12 +6,19 @@ import com.example.twitchnetworknotifier.monitor.model.StatusEvent
 import com.example.twitchnetworknotifier.monitor.model.StreamStatus
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import kotlin.test.assertEquals
 
 @RunWith(AndroidJUnit4::class)
 class HistoryStoreTest {
+
+    @Before
+    fun clearState() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        HistoryStore(context).clear()
+    }
 
     @Test
     fun addEventPrependsNewestFirst() = runBlocking {

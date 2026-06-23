@@ -38,6 +38,10 @@ class HistoryStore(private val context: Context) {
         }
     }
 
+    suspend fun clear() {
+        context.historyDataStore.edit { it.clear() }
+    }
+
     private fun parseEvents(json: String): List<StatusEvent> {
         val array = JSONArray(json)
         return (0 until array.length()).map { index ->

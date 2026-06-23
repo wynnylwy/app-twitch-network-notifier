@@ -29,6 +29,7 @@ class MainFragmentTest {
     fun clearState() = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         SettingsStore(context).setMonitoringEnabled(false)
+        HistoryStore(context).clear()
     }
 
     @Test
