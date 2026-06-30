@@ -1,5 +1,6 @@
 package com.example.twitchnetworknotifier.ui.main
 
+import android.annotation.SuppressLint
 import android.text.format.DateFormat
 import android.view.LayoutInflater
 import android.view.View
@@ -9,7 +10,9 @@ import androidx.recyclerview.widget.RecyclerView
 import com.example.twitchnetworknotifier.R
 import com.example.twitchnetworknotifier.monitor.model.StatusEvent
 import com.example.twitchnetworknotifier.monitor.model.StreamStatus
+import java.text.SimpleDateFormat
 import java.util.Date
+import java.util.Locale
 
 class HistoryAdapter : RecyclerView.Adapter<HistoryAdapter.ViewHolder>() {
 
@@ -35,6 +38,7 @@ class HistoryAdapter : RecyclerView.Adapter<HistoryAdapter.ViewHolder>() {
         private val textView: TextView = itemView.findViewById(R.id.text_event)
 
         fun bind(event: StatusEvent) {
+            val date = SimpleDateFormat("dd-MM-yyyy", Locale.getDefault()).format(Date(event.timestampMillis))
             val time = DateFormat.getTimeFormat(itemView.context).format(Date(event.timestampMillis))
             val description = when (event.toState) {
                 StreamStatus.LIVE -> "back online"
@@ -42,7 +46,7 @@ class HistoryAdapter : RecyclerView.Adapter<HistoryAdapter.ViewHolder>() {
                 StreamStatus.CONNECTION_ISSUE -> "connection issue"
                 StreamStatus.UNKNOWN -> "status unknown"
             }
-            textView.text = "$time — $description"
+            textView.text = "$date | $time — $description"
         }
     }
 }

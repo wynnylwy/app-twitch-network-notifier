@@ -1,0 +1,16 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Run app on device",
+      "type": "shell",
+      "command": "./gradlew installDebug && \"$HOME/Library/Android/sdk/platform-tools/adb\" shell am start -n com.example.twitchnetworknotifier.debug/com.example.twitchnetworknotifier.MainActivity",
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    }
+  ]
+}

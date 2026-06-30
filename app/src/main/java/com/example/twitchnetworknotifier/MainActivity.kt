@@ -18,6 +18,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var appBarConfiguration: AppBarConfiguration
     private lateinit var binding: ActivityMainBinding
+    private var optionsMenu: Menu? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -39,11 +40,19 @@ class MainActivity : AppCompatActivity() {
 
         appBarConfiguration = AppBarConfiguration(navController.graph)
         setupActionBarWithNavController(navController, appBarConfiguration)
+
+        navController.addOnDestinationChangedListener { _, destination, _ ->
+            optionsMenu?.findItem(R.id.action_settings)?.isVisible =
+                destination.id != R.id.settingsFragment
+        }
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
-        // Inflate the menu; this adds items to the action bar if it is present.
         menuInflater.inflate(R.menu.menu_main, menu)
+        optionsMenu = menu
+        val navController = findNavController(R.id.nav_host_fragment_content_main)
+        menu.findItem(R.id.action_settings)?.isVisible =
+            navController.currentDestination?.id != R.id.settingsFragment
         return true
     }
 
@@ -51,7 +60,7 @@ class MainActivity : AppCompatActivity() {
         return when (item.itemId) {
             R.id.action_settings -> {
                 findNavController(R.id.nav_host_fragment_content_main)
-                    .navigate(R.id.action_mainFragment_to_settingsFragment)
+                    .navigate(R.id.settingsFragment)
                 true
             }
             else -> super.onOptionsItemSelected(item)

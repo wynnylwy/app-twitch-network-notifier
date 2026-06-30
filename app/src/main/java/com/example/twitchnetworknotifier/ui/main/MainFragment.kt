@@ -29,7 +29,6 @@ class MainFragment : Fragment() {
 
     private val viewModel: MainViewModel by viewModels()
     private val historyAdapter = HistoryAdapter()
-    private var isUpdatingSwitchProgrammatically = false
 
     private val requestNotificationPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -50,33 +49,26 @@ class MainFragment : Fragment() {
         binding.recyclerHistory.layoutManager = LinearLayoutManager(requireContext())
         binding.recyclerHistory.adapter = historyAdapter
 
-        binding.switchMonitoring.setOnCheckedChangeListener { _, isChecked ->
-            if (isUpdatingSwitchProgrammatically) return@setOnCheckedChangeListener
+        binding.switchMonitoring.setOnCheckedChangeListener { switchView, isChecked ->
+            if (!switchView.isPressed) return@setOnCheckedChangeListener  // ignore programmatic sync from line 69
+
             if (isChecked) {
-                maybeRequestNotificationPermission()
                 viewModel.setMonitoringEnabled(true)
+                requestNotificationPermission()
                 StreamMonitorService.start(requireContext(), showWelcome = true)
             } else {
-                setSwitchChecked(true)
                 showToggleOffConfirmation()
             }
         }
 
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                launch { viewModel.monitoringEnabled.collect { setSwitchChecked(it) } }
+                launch { viewModel.monitoringEnabled.collect { binding.switchMonitoring.isChecked = it } }
                 launch { viewModel.currentStatus.collect { updateStatusText(it) } }
                 launch { viewModel.history.collect { historyAdapter.submitList(it) } }
             }
         }
     }
-
-    private fun setSwitchChecked(checked: Boolean) {
-        isUpdatingSwitchProgrammatically = true
-        binding.switchMonitoring.isChecked = checked
-        isUpdatingSwitchProgrammatically = false
-    }
-
     private fun updateStatusText(status: StreamStatus) {
         binding.textStatus.text = when (status) {
             StreamStatus.UNKNOWN -> getString(R.string.status_unknown)
@@ -98,7 +90,7 @@ class MainFragment : Fragment() {
             .show()
     }
 
-    private fun maybeRequestNotificationPermission() {
+    private fun requestNotificationPermission() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
         val granted = ContextCompat.checkSelfPermission(
             requireContext(),

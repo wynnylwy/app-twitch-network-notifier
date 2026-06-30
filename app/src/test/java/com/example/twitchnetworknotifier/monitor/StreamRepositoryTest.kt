@@ -113,6 +113,23 @@ class StreamRepositoryTest {
     }
 
     @Test
+    fun disablingMonitoringResetsCurrentStatusToUnknown() = runTest {
+        val api = FakeTwitchApiClient()
+        api.queueResult(TwitchCheckResult.Live)
+        val (historyStore, _) = fakeHistoryStore()
+        val settingsStore = fakeSettingsStore()
+        coEvery { settingsStore.setMonitoringEnabled(any()) } returns Unit
+        val repository = buildRepository(api, settingsStore, historyStore)
+
+        repository.checkOnce()
+        assertEquals(StreamStatus.LIVE, repository.currentStatus.value)
+
+        repository.setMonitoringEnabled(false)
+
+        assertEquals(StreamStatus.UNKNOWN, repository.currentStatus.value)
+    }
+
+    @Test
     fun alertsFlowEmitsOnlyOnStateChange() = runTest {
         val api = FakeTwitchApiClient()
         api.queueResult(TwitchCheckResult.Live)
