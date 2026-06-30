@@ -9,20 +9,10 @@
         android:id="@+id/mainFragment"
         android:name="com.example.twitchnetworknotifier.ui.main.MainFragment"
         android:label="@string/main_fragment_label"
-        tools:layout="@layout/fragment_main">
-
-        <action
-            android:id="@+id/action_mainFragment_to_settingsFragment"
-            app:destination="@id/settingsFragment" />
-    </fragment>
+        tools:layout="@layout/fragment_main" />
     <fragment
         android:id="@+id/settingsFragment"
         android:name="com.example.twitchnetworknotifier.ui.settings.SettingsFragment"
         android:label="@string/settings_fragment_label"
-        tools:layout="@layout/fragment_settings">
-
-        <action
-            android:id="@+id/action_settingsFragment_to_mainFragment"
-            app:destination="@id/mainFragment" />
-    </fragment>
+        tools:layout="@layout/fragment_settings" />
 </navigation>

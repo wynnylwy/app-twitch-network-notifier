@@ -40,6 +40,10 @@ class StreamRepository(
 
     suspend fun setMonitoringEnabled(enabled: Boolean) {
         settingsStore.setMonitoringEnabled(enabled)
+        if (!enabled) {
+            // Monitoring stopped: clear the stale status so the UI reflects "Monitoring off".
+            _currentStatus.value = StreamStatus.UNKNOWN
+        }
     }
 
     suspend fun checkOnce(): StreamStatus {
