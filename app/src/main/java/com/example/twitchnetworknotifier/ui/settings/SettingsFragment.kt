@@ -4,6 +4,7 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.Lifecycle
@@ -37,6 +38,30 @@ class SettingsFragment : Fragment() {
                 binding.editChannelName.setText(settings.channelName)
                 binding.editClientId.setText(settings.clientId)
                 binding.editClientSecret.setText(settings.clientSecret)
+            }
+        }
+
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.isSaving.collect { saving ->
+                    binding.progressSave.visibility = if (saving) View.VISIBLE else View.GONE
+                    binding.buttonSave.visibility = if (saving) View.INVISIBLE else View.VISIBLE
+                    binding.buttonSave.isEnabled = !saving
+                }
+            }
+        }
+
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.saveResults.collect { result ->
+                    val message = if (result.isSuccess) {
+                        "Saved"
+                    } else {
+                        val reason = result.exceptionOrNull()?.message?.takeIf { it.isNotBlank() }
+                        if (reason != null) "Save failed: $reason" else "Save failed"
+                    }
+                    Toast.makeText(requireContext(), message, Toast.LENGTH_LONG).show()
+                }
             }
         }
 
