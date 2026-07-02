@@ -91,6 +91,22 @@ class StreamRepositoryTest {
     }
 
     @Test
+    fun offlineRecoversToLiveOnLaterRetry() = runTest {
+        val api = FakeTwitchApiClient()
+        api.queueResult(TwitchCheckResult.Offline) // initial check
+        api.queueResult(TwitchCheckResult.Offline) // retry 1 (10s) still offline
+        api.queueResult(TwitchCheckResult.Live)    // retry 2 (20s) recovers
+        val (historyStore, _) = fakeHistoryStore()
+        val repository = buildRepository(api, fakeSettingsStore(), historyStore)
+
+        val status = repository.checkOnce()
+        advanceUntilIdle()
+
+        assertEquals(StreamStatus.LIVE, status)
+        assertEquals(3, api.callCount)
+    }
+
+    @Test
     fun alreadyOfflineUsesSingleCheck() = runTest {
         val api = FakeTwitchApiClient()
         repeat(4) { api.queueResult(TwitchCheckResult.Offline) } // first cycle confirms offline

@@ -5,8 +5,10 @@ import android.content.Intent
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.onSubscription
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -48,11 +50,18 @@ class StreamMonitorService : LifecycleService() {
 
         if (loopJob == null) {
             loopJob = lifecycleScope.launch {
+                val collectorReady = CompletableDeferred<Unit>()
                 launch {
-                    repository.alerts.collect { event ->
-                        notificationHelper.showAlert(notificationHelper.messageForStatus(event.toState))
-                    }
+                    repository.alerts
+                        .onSubscription { collectorReady.complete(Unit) }
+                        .collect { event ->
+                            notificationHelper.showAlert(notificationHelper.messageForStatus(event.toState))
+                        }
                 }
+                // Wait until the alert collector is subscribed before the first check can
+                // emit; otherwise the first alert of the session would be dropped, because
+                // repository.alerts is a replay = 0 SharedFlow.
+                collectorReady.await()
                 while (isActive) {
                     repository.checkOnce()
                     delay(CHECK_INTERVAL_MILLIS)
