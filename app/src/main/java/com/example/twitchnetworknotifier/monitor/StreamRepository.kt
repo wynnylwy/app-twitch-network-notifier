@@ -27,6 +27,7 @@ class StreamRepository(
 
     companion object {
         private val RETRY_BACKOFF_MILLIS = listOf(10_000L, 20_000L, 40_000L)
+        private const val MAX_PROBLEM_NOTIFICATIONS = 3
     }
 
     private val _currentStatus = MutableStateFlow(StreamStatus.UNKNOWN)
@@ -34,6 +35,9 @@ class StreamRepository(
 
     private val _alerts = MutableSharedFlow<StatusEvent>(extraBufferCapacity = 1)
     val alerts: SharedFlow<StatusEvent> = _alerts.asSharedFlow()
+
+    // Notifications sent for the current consecutive problem streak; resets on any status change.
+    private var problemNotificationCount = 0
 
     val monitoringEnabled: Flow<Boolean> = settingsStore.settings.map { it.monitoringEnabled }
     val history: Flow<List<StatusEvent>> = historyStore.events
@@ -43,37 +47,65 @@ class StreamRepository(
         if (!enabled) {
             // Monitoring stopped: clear the stale status so the UI reflects "Monitoring off".
             _currentStatus.value = StreamStatus.UNKNOWN
+            problemNotificationCount = 0
         }
     }
 
     suspend fun checkOnce(): StreamStatus {
         val settings = settingsStore.settings.first()
-        val result = performCheckWithRetry(settings)
+        val previousStatus = _currentStatus.value
+
+        val result = performCheck(settings, previousStatus)
         val newStatus = when (result) {
             is TwitchCheckResult.Live -> StreamStatus.LIVE
             is TwitchCheckResult.Offline -> StreamStatus.OFFLINE
             is TwitchCheckResult.Failure -> StreamStatus.CONNECTION_ISSUE
         }
 
-        val previousStatus = _currentStatus.value
-        if (newStatus != previousStatus) {
-            _currentStatus.value = newStatus
-            val event = StatusEvent(clock(), previousStatus, newStatus)
-            historyStore.addEvent(event)
-            _alerts.emit(event)
-        }
+        applyStatus(previousStatus, newStatus)
         return newStatus
     }
 
-    private suspend fun performCheckWithRetry(settings: Settings): TwitchCheckResult {
-        var lastResult = apiClient.getStreamStatus(settings.channelName, settings.clientId, settings.clientSecret)
-        if (lastResult !is TwitchCheckResult.Failure) return lastResult
+    // Confirms a non-live result with retries only when leaving a healthy/unknown
+    // state. Once already in a problem state, a single quick check is used.
+    private suspend fun performCheck(settings: Settings, previousStatus: StreamStatus): TwitchCheckResult {
+        val firstResult = apiClient.getStreamStatus(settings.channelName, settings.clientId, settings.clientSecret)
+        val enteringProblem = previousStatus == StreamStatus.LIVE || previousStatus == StreamStatus.UNKNOWN
+        if (firstResult is TwitchCheckResult.Live || !enteringProblem) {
+            return firstResult
+        }
 
+        var lastResult = firstResult
         for (backoffMillis in RETRY_BACKOFF_MILLIS) {
             delay(backoffMillis)
             lastResult = apiClient.getStreamStatus(settings.channelName, settings.clientId, settings.clientSecret)
-            if (lastResult !is TwitchCheckResult.Failure) return lastResult
+            if (lastResult is TwitchCheckResult.Live) return lastResult
         }
         return lastResult
+    }
+
+    private suspend fun applyStatus(previousStatus: StreamStatus, newStatus: StreamStatus) {
+        if (newStatus != previousStatus) {
+            _currentStatus.value = newStatus
+            problemNotificationCount = 0
+            historyStore.addEvent(StatusEvent(clock(), previousStatus, newStatus))
+        }
+
+        when (newStatus) {
+            StreamStatus.LIVE -> {
+                if (previousStatus == StreamStatus.OFFLINE || previousStatus == StreamStatus.CONNECTION_ISSUE) {
+                    _alerts.emit(StatusEvent(clock(), previousStatus, newStatus))
+                }
+            }
+            StreamStatus.OFFLINE, StreamStatus.CONNECTION_ISSUE -> {
+                if (problemNotificationCount < MAX_PROBLEM_NOTIFICATIONS) {
+                    problemNotificationCount++
+                    _alerts.emit(StatusEvent(clock(), previousStatus, newStatus))
+                }
+            }
+            StreamStatus.UNKNOWN -> {
+                // Not produced by a check; nothing to notify.
+            }
+        }
     }
 }

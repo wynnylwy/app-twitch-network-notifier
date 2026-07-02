@@ -40,33 +40,73 @@ class StreamRepositoryTest {
     }
 
     @Test
-    fun firstCheckLiveTransitionsFromUnknownAndRecordsHistory() = runTest {
+    fun firstCheckLiveRecordsHistoryButEmitsNoAlert() = runTest {
         val api = FakeTwitchApiClient()
         api.queueResult(TwitchCheckResult.Live)
         val (historyStore, recorded) = fakeHistoryStore()
         val repository = buildRepository(api, fakeSettingsStore(), historyStore, clock = { 5_000L })
 
+        val emitted = mutableListOf<StatusEvent>()
+        val job = launch { repository.alerts.collect { emitted.add(it) } }
+        testScheduler.runCurrent()
+
         val status = repository.checkOnce()
+        advanceUntilIdle()
+        job.cancel()
 
         assertEquals(StreamStatus.LIVE, status)
-        assertEquals(StreamStatus.LIVE, repository.currentStatus.value)
         assertEquals(1, recorded.size)
         assertEquals(StreamStatus.UNKNOWN, recorded[0].fromState)
         assertEquals(StreamStatus.LIVE, recorded[0].toState)
-        assertEquals(5_000L, recorded[0].timestampMillis)
+        assertEquals(0, emitted.size)
     }
 
     @Test
-    fun confirmedOfflineDoesNotRetry() = runTest {
+    fun firstOfflineFromUnknownRetriesToConfirm() = runTest {
         val api = FakeTwitchApiClient()
-        api.queueResult(TwitchCheckResult.Offline)
+        repeat(4) { api.queueResult(TwitchCheckResult.Offline) }
         val (historyStore, _) = fakeHistoryStore()
         val repository = buildRepository(api, fakeSettingsStore(), historyStore)
 
         val status = repository.checkOnce()
+        advanceUntilIdle()
 
         assertEquals(StreamStatus.OFFLINE, status)
-        assertEquals(1, api.callCount)
+        assertEquals(4, api.callCount)
+    }
+
+    @Test
+    fun offlineBlipRecoversToLiveDuringRetry() = runTest {
+        val api = FakeTwitchApiClient()
+        api.queueResult(TwitchCheckResult.Offline)
+        api.queueResult(TwitchCheckResult.Live)
+        val (historyStore, _) = fakeHistoryStore()
+        val repository = buildRepository(api, fakeSettingsStore(), historyStore)
+
+        val status = repository.checkOnce()
+        advanceUntilIdle()
+
+        assertEquals(StreamStatus.LIVE, status)
+        assertEquals(2, api.callCount)
+    }
+
+    @Test
+    fun alreadyOfflineUsesSingleCheck() = runTest {
+        val api = FakeTwitchApiClient()
+        repeat(4) { api.queueResult(TwitchCheckResult.Offline) } // first cycle confirms offline
+        api.queueResult(TwitchCheckResult.Offline)               // second cycle: single check
+        val (historyStore, _) = fakeHistoryStore()
+        val repository = buildRepository(api, fakeSettingsStore(), historyStore)
+
+        repository.checkOnce()
+        advanceUntilIdle()
+        val afterFirst = api.callCount
+
+        repository.checkOnce()
+        advanceUntilIdle()
+
+        assertEquals(4, afterFirst)
+        assertEquals(5, api.callCount)
     }
 
     @Test
@@ -84,32 +124,72 @@ class StreamRepositoryTest {
     }
 
     @Test
-    fun callFailureThenSuccessOnRetryRecoversWithoutConnectionIssue() = runTest {
+    fun offlineStreakEmitsThreeAlertsThenGoesQuiet() = runTest {
         val api = FakeTwitchApiClient()
-        api.queueResult(TwitchCheckResult.Failure("boom"))
-        api.queueResult(TwitchCheckResult.Live)
+        // cycle 1 confirms offline (4 calls); cycles 2-4 single check (1 call each)
+        repeat(8) { api.queueResult(TwitchCheckResult.Offline) }
         val (historyStore, _) = fakeHistoryStore()
         val repository = buildRepository(api, fakeSettingsStore(), historyStore)
 
-        val status = repository.checkOnce()
-        advanceUntilIdle()
+        val emitted = mutableListOf<StatusEvent>()
+        val job = launch { repository.alerts.collect { emitted.add(it) } }
+        testScheduler.runCurrent()
 
-        assertEquals(StreamStatus.LIVE, status)
-        assertEquals(2, api.callCount)
+        repeat(4) {
+            repository.checkOnce()
+            advanceUntilIdle()
+        }
+        job.cancel()
+
+        assertEquals(3, emitted.size)
+        assertEquals(listOf(StreamStatus.OFFLINE, StreamStatus.OFFLINE, StreamStatus.OFFLINE), emitted.map { it.toState })
     }
 
     @Test
-    fun repeatedSameStatusDoesNotEmitDuplicateAlert() = runTest {
+    fun recoveryToLiveEmitsBackOnlineAndResetsStreak() = runTest {
         val api = FakeTwitchApiClient()
-        api.queueResult(TwitchCheckResult.Live)
-        api.queueResult(TwitchCheckResult.Live)
-        val (historyStore, recorded) = fakeHistoryStore()
+        repeat(4) { api.queueResult(TwitchCheckResult.Offline) } // cycle 1: confirm offline
+        api.queueResult(TwitchCheckResult.Live)                  // cycle 2: recovery
+        repeat(4) { api.queueResult(TwitchCheckResult.Offline) } // cycle 3: offline again (fresh streak)
+        val (historyStore, _) = fakeHistoryStore()
         val repository = buildRepository(api, fakeSettingsStore(), historyStore)
 
-        repository.checkOnce()
-        repository.checkOnce()
+        val emitted = mutableListOf<StatusEvent>()
+        val job = launch { repository.alerts.collect { emitted.add(it) } }
+        testScheduler.runCurrent()
 
-        assertEquals(1, recorded.size)
+        repeat(3) {
+            repository.checkOnce()
+            advanceUntilIdle()
+        }
+        job.cancel()
+
+        assertEquals(3, emitted.size)
+        assertEquals(StreamStatus.OFFLINE, emitted[0].toState) // streak 1, reminder #1
+        assertEquals(StreamStatus.LIVE, emitted[1].toState)    // back online
+        assertEquals(StreamStatus.OFFLINE, emitted[2].toState) // fresh streak, reminder #1
+    }
+
+    @Test
+    fun connectionIssueEmitsThreeAlertsThenGoesQuiet() = runTest {
+        val api = FakeTwitchApiClient()
+        // cycle 1 confirms connection issue (4 calls); cycles 2-4 single check (1 call each)
+        repeat(8) { api.queueResult(TwitchCheckResult.Failure("boom")) }
+        val (historyStore, _) = fakeHistoryStore()
+        val repository = buildRepository(api, fakeSettingsStore(), historyStore)
+
+        val emitted = mutableListOf<StatusEvent>()
+        val job = launch { repository.alerts.collect { emitted.add(it) } }
+        testScheduler.runCurrent()
+
+        repeat(4) {
+            repository.checkOnce()
+            advanceUntilIdle()
+        }
+        job.cancel()
+
+        assertEquals(3, emitted.size)
+        assertEquals(listOf(StreamStatus.CONNECTION_ISSUE, StreamStatus.CONNECTION_ISSUE, StreamStatus.CONNECTION_ISSUE), emitted.map { it.toState })
     }
 
     @Test
@@ -127,27 +207,5 @@ class StreamRepositoryTest {
         repository.setMonitoringEnabled(false)
 
         assertEquals(StreamStatus.UNKNOWN, repository.currentStatus.value)
-    }
-
-    @Test
-    fun alertsFlowEmitsOnlyOnStateChange() = runTest {
-        val api = FakeTwitchApiClient()
-        api.queueResult(TwitchCheckResult.Live)
-        api.queueResult(TwitchCheckResult.Offline)
-        val (historyStore, _) = fakeHistoryStore()
-        val repository = buildRepository(api, fakeSettingsStore(), historyStore)
-
-        val emitted = mutableListOf<StatusEvent>()
-        val job = launch { repository.alerts.collect { emitted.add(it) } }
-        testScheduler.runCurrent()
-
-        repository.checkOnce()
-        repository.checkOnce()
-        advanceUntilIdle()
-        job.cancel()
-
-        assertEquals(2, emitted.size)
-        assertEquals(StreamStatus.LIVE, emitted[0].toState)
-        assertEquals(StreamStatus.OFFLINE, emitted[1].toState)
     }
 }
