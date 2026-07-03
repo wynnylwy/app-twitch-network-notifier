@@ -26,7 +26,8 @@ class StreamRepository(
 ) {
 
     companion object {
-        private val RETRY_BACKOFF_MILLIS = listOf(10_000L, 20_000L, 40_000L)
+        // TODO: TEMP for testing — restore to listOf(10_000L, 20_000L, 40_000L) before shipping.
+        private val RETRY_BACKOFF_MILLIS = listOf(2_000L, 4_000L, 6_000L)
         private const val MAX_PROBLEM_NOTIFICATIONS = 3
     }
 

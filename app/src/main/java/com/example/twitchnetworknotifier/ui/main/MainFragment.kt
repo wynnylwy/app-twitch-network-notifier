@@ -48,27 +48,29 @@ class MainFragment : Fragment() {
 
         binding.recyclerHistory.layoutManager = LinearLayoutManager(requireContext())
         binding.recyclerHistory.adapter = historyAdapter
-
-        binding.switchMonitoring.setOnCheckedChangeListener { switchView, isChecked ->
-            if (!switchView.isPressed) return@setOnCheckedChangeListener  // ignore programmatic sync from line 69
-
-            if (isChecked) {
-                viewModel.setMonitoringEnabled(true)
-                requestNotificationPermission()
-                StreamMonitorService.start(requireContext(), showWelcome = true)
+        binding.switchMonitoring.setOnClickListener {
+            if (binding.switchMonitoring.isChecked) {
+                startMonitoring()
             } else {
-                showToggleOffConfirmation()
+                // Keep the switch on until the user confirms; the tap already flipped it.
+                binding.switchMonitoring.isChecked = true
+                showStopMonitoringDialog()
             }
         }
 
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                launch { viewModel.monitoringEnabled.collect { binding.switchMonitoring.isChecked = it } }
+                launch {
+                    viewModel.monitoringEnabled.collect {
+                        binding.switchMonitoring.isChecked = it
+                    }
+                }
                 launch { viewModel.currentStatus.collect { updateStatusText(it) } }
                 launch { viewModel.history.collect { historyAdapter.submitList(it) } }
             }
         }
     }
+
     private fun updateStatusText(status: StreamStatus) {
         binding.textStatus.text = when (status) {
             StreamStatus.UNKNOWN -> getString(R.string.status_unknown)
@@ -78,16 +80,24 @@ class MainFragment : Fragment() {
         }
     }
 
-    private fun showToggleOffConfirmation() {
+    private fun startMonitoring() {
+        viewModel.setMonitoringEnabled(true)
+        requestNotificationPermission()
+        StreamMonitorService.start(requireContext(), showWelcome = true)
+    }
+
+    private fun showStopMonitoringDialog() {
         AlertDialog.Builder(requireContext())
             .setTitle(R.string.dialog_toggle_off_title)
-            .setPositiveButton(R.string.dialog_yes) { _, _ ->
-                viewModel.setMonitoringEnabled(false)
-                StreamMonitorService.stop(requireContext())
-            }
-            .setNegativeButton(R.string.dialog_no, null)
-            .setCancelable(false)
+            .setPositiveButton(R.string.dialog_yes) { _, _ -> stopMonitoring() }
+            .setNegativeButton(R.string.dialog_no, null) // no-op: switch is already on
             .show()
+    }
+
+    private fun stopMonitoring() {
+        viewModel.setMonitoringEnabled(false)
+        StreamMonitorService.stop(requireContext())
+        // The observer flips the switch off once the state actually changes.
     }
 
     private fun requestNotificationPermission() {
