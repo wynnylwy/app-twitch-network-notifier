@@ -159,6 +159,7 @@ class StreamRepositoryTest {
 
         assertEquals(3, emitted.size)
         assertEquals(listOf(StreamStatus.OFFLINE, StreamStatus.OFFLINE, StreamStatus.OFFLINE), emitted.map { it.toState })
+        assertEquals(listOf(1, 2, 3), emitted.map { it.attempt })
     }
 
     @Test
@@ -182,8 +183,10 @@ class StreamRepositoryTest {
 
         assertEquals(3, emitted.size)
         assertEquals(StreamStatus.OFFLINE, emitted[0].toState) // streak 1, reminder #1
+        assertEquals(1, emitted[0].attempt)
         assertEquals(StreamStatus.LIVE, emitted[1].toState)    // back online
         assertEquals(StreamStatus.OFFLINE, emitted[2].toState) // fresh streak, reminder #1
+        assertEquals(1, emitted[2].attempt)                    // streak reset after recovery
     }
 
     @Test
@@ -206,6 +209,7 @@ class StreamRepositoryTest {
 
         assertEquals(3, emitted.size)
         assertEquals(listOf(StreamStatus.CONNECTION_ISSUE, StreamStatus.CONNECTION_ISSUE, StreamStatus.CONNECTION_ISSUE), emitted.map { it.toState })
+        assertEquals(listOf(1, 2, 3), emitted.map { it.attempt })
     }
 
     @Test

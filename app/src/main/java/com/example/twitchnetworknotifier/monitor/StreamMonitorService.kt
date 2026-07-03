@@ -55,7 +55,7 @@ class StreamMonitorService : LifecycleService() {
                     repository.alerts
                         .onSubscription { collectorReady.complete(Unit) }
                         .collect { event ->
-                            notificationHelper.showAlert(notificationHelper.messageForStatus(event.toState))
+                            notificationHelper.showAlert(notificationHelper.alertMessage(event))
                         }
                 }
                 // Wait until the alert collector is subscribed before the first check can

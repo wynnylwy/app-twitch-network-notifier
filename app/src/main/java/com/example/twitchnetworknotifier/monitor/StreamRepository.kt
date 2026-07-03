@@ -100,7 +100,7 @@ class StreamRepository(
             StreamStatus.OFFLINE, StreamStatus.CONNECTION_ISSUE -> {
                 if (problemNotificationCount < MAX_PROBLEM_NOTIFICATIONS) {
                     problemNotificationCount++
-                    _alerts.emit(StatusEvent(clock(), previousStatus, newStatus))
+                    _alerts.emit(StatusEvent(clock(), previousStatus, newStatus, attempt = problemNotificationCount))
                 }
             }
             StreamStatus.UNKNOWN -> {

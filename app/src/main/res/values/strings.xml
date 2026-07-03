@@ -17,6 +17,7 @@
     <string name="notif_offline">Your live stream is offline, please check.</string>
     <string name="notif_connection_issue">Could not verify your stream status (connection issue).</string>
     <string name="notif_back_live">Your streaming is live now.</string>
+    <string name="notif_problem_format">#%1$d: %2$s</string>
     <string name="dialog_toggle_off_title">You sure to off monitoring?</string>
     <string name="dialog_yes">Yes</string>
     <string name="dialog_no">No</string>
