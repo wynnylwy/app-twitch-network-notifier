@@ -21,7 +21,10 @@ Give the user immediate, explicit feedback after saving new settings:
    countdown, then dismiss it and return to Home, where the history log shows
    the recovered ("back online") status.
 3. On failure, surface the problem immediately and keep the user on Settings to
-   fix and re-save, while the background monitor continues retrying.
+   fix and re-save, while the background monitor continues retrying. Once new
+   credentials are saved, any in-flight old-credential retry must not overwrite
+   the fresh result and must not pop a stale retry notification for the old
+   credentials.
 
 ## Decisions
 
@@ -34,6 +37,10 @@ Give the user immediate, explicit feedback after saving new settings:
 - **Single immediate attempt.** The dialog decision is made on **one** API call
   with **no** internal retry/backoff wait. Retries are purely the background
   monitor service's job.
+- **New credentials invalidate old in-flight checks.** Saving bumps a credential
+  generation. Any check that used older credentials is discarded on completion —
+  it cannot change status, write history, or fire a notification. See
+  "Concurrency & stale-result handling" below.
 - **Failure path fails closed.** On a failed connect, dismiss "Connecting…"
   immediately (no ~12s/70s wait), show a dismissible error dialog, and keep the
   user on Settings. The running monitor keeps polling in the background, so a
@@ -72,19 +79,50 @@ Unchanged. Persist settings, show the "Saved" toast, no dialog, no navigation.
 4. The check records its transition event through `applyStatus`, so Home
    re-renders the updated status and history automatically.
 
+## Concurrency & stale-result handling
+
+Both the Settings-initiated `checkNow()` and the background service loop's
+`checkOnce()` run against the same shared repository, so two guarantees are
+required:
+
+1. **Serialization.** A `Mutex` in the repository ensures state mutations
+   (`_currentStatus`, `problemNotificationCount`, history writes, alert
+   emissions) never interleave — no double history rows, no clobbered status.
+2. **Credential-generation guard.** The repository tracks a monotonically
+   increasing `credentialGeneration` that bumps whenever settings are saved.
+   Each check captures the generation of the credentials it read. Before
+   applying its result (status update, history write, **or alert/notification
+   emission**), it verifies the captured generation is still current. If a newer
+   save has occurred, the result is **discarded silently** — no status change,
+   no history row, no notification.
+
+**Net effect:** saving new credentials invalidates any in-flight
+old-credential check. The old check cannot overwrite the fresh new-credential
+result and cannot pop a stale retry notification for the old credentials. The
+new `checkNow()` result is authoritative. The two checks are never observably
+parallel — the stale one is thrown away.
+
+Latency is explicitly a non-goal here: the priority is that the on-processing
+old retry never corrupts the new result or fires a stale notification.
+
 ## Components
 
 ### `StreamRepository`
 - Add `private val checkMutex = Mutex()`.
-- Add `suspend fun checkNow(): StreamStatus` — reads current settings, performs
-  a **single** `apiClient.getStreamStatus(...)` call (no `performCheck` retry
-  loop), maps the result to `StreamStatus`, runs `applyStatus`, and returns the
-  new status. Guarded by `checkMutex`.
-- Wrap the existing `checkOnce()` body in `checkMutex.withLock { ... }` so the
-  Settings-initiated `checkNow()` and the service loop's `checkOnce()` never
-  overlap (no double history rows / clobbered status).
-- `checkOnce()` (with retry/backoff) remains the method the background service
-  loop calls; its behavior is otherwise unchanged.
+- Add a `credentialGeneration` counter that bumps on every settings save (e.g.
+  incremented via a `bumpCredentialGeneration()` call the save path invokes, or
+  derived from observing the settings flow). Persisted state is not required;
+  an in-memory counter is sufficient.
+- Add `suspend fun checkNow(): StreamStatus` — bumps/reads the generation for
+  the just-saved credentials, reads current settings, performs a **single**
+  `apiClient.getStreamStatus(...)` call (no `performCheck` retry loop), maps the
+  result to `StreamStatus`, and applies it **only if** the generation is still
+  current, then returns the new status. Guarded by `checkMutex`.
+- Wrap the existing `checkOnce()` body in `checkMutex.withLock { ... }` and add
+  the same generation check before it applies its result, so a stale
+  old-credential loop check is discarded once new credentials are saved.
+- `checkOnce()` (with retry/backoff) otherwise remains the method the background
+  service loop calls; its behavior is unchanged for the current-generation case.
 
 ### `SettingsViewModel`
 - Inject the shared repository via `AppContainer.getRepository(application)`.
@@ -135,4 +173,9 @@ Unchanged. Persist settings, show the "Saved" toast, no dialog, no navigation.
   - `checkNow()` performs a single API call and returns the mapped status.
   - `checkNow()` records the transition event (and does not duplicate when
     already in the same state).
-  - `checkOnce()` behavior unchanged.
+  - `checkOnce()` behavior unchanged for the current-generation case.
+  - **Stale-result guard:** a check whose captured generation is older than the
+    current one applies nothing — no status change, no history row, no alert
+    emitted. (Simulate by bumping the generation between a check's API call and
+    its apply step, e.g. via a fake API client that saves/generation-bumps
+    mid-call.)
