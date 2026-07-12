@@ -149,6 +149,7 @@ class SettingsViewModelTest {
         assertEquals(1, results.size)
         assertTrue(results[0].isFailure)
         coVerify(exactly = 0) { repository.checkNow() }
+        coVerify(exactly = 0) { repository.bumpCredentialGeneration() }
     }
 
     @Test

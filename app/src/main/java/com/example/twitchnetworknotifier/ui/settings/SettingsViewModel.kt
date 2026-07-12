@@ -54,6 +54,9 @@ class SettingsViewModel @JvmOverloads constructor(
 
     fun save(channelName: String, clientId: String, clientSecret: String) {
         if (_isSaving.value) return
+        // Defense-in-depth: the modal dialogs already block the Save button mid-flow,
+        // but never allow a second connect flow to start concurrently.
+        if (_saveFlowState.value != SaveFlowState.Idle) return
         viewModelScope.launch {
             _isSaving.value = true
             val result = runCatching {
