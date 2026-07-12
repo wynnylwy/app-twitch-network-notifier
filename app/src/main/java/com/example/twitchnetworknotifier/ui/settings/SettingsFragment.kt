@@ -12,6 +12,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation.fragment.findNavController
+import com.example.twitchnetworknotifier.BuildConfig
 import com.example.twitchnetworknotifier.R
 import com.example.twitchnetworknotifier.databinding.FragmentSettingsBinding
 import com.example.twitchnetworknotifier.ui.settings.SettingsViewModel.SaveFlowState
@@ -39,6 +40,8 @@ class SettingsFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+
+        binding.textVersion.text = getString(R.string.settings_version, BuildConfig.VERSION_NAME)
 
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {

@@ -31,4 +31,5 @@
     <string name="settings_client_id_hint">Client ID</string>
     <string name="settings_client_secret_hint">Client Secret</string>
     <string name="settings_save">Save</string>
+    <string name="settings_version">VER. %1$s</string>
 </resources>
