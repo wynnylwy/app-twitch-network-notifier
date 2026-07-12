@@ -279,4 +279,53 @@ class StreamRepositoryTest {
         assertEquals(0, emitted.size)                      // no stale notification
         assertEquals(0L, currentTime)                      // woke instantly, not after backoff
     }
+
+    @Test
+    fun checkNowUsesSingleCallAndRecordsTransition() = runTest {
+        val api = FakeTwitchApiClient()
+        api.queueResult(TwitchCheckResult.Offline) // would trigger retries in checkOnce
+        val (historyStore, recorded) = fakeHistoryStore()
+        val repository = buildRepository(api, fakeSettingsStore(), historyStore, clock = { 7_000L })
+
+        val status = repository.checkNow()
+        advanceUntilIdle()
+
+        assertEquals(StreamStatus.OFFLINE, status)
+        assertEquals(1, api.callCount) // single call, NO retry/backoff
+        assertEquals(1, recorded.size)
+        assertEquals(StreamStatus.UNKNOWN, recorded[0].fromState)
+        assertEquals(StreamStatus.OFFLINE, recorded[0].toState)
+    }
+
+    @Test
+    fun checkNowDoesNotDuplicateHistoryWhenStatusUnchanged() = runTest {
+        val api = FakeTwitchApiClient()
+        api.queueResult(TwitchCheckResult.Failure("bad"))
+        api.queueResult(TwitchCheckResult.Failure("still bad"))
+        val (historyStore, recorded) = fakeHistoryStore()
+        val repository = buildRepository(api, fakeSettingsStore(), historyStore)
+
+        repository.checkNow() // UNKNOWN -> CONNECTION_ISSUE: one row
+        repository.checkNow() // repeated failure: no new row
+        advanceUntilIdle()
+
+        assertEquals(StreamStatus.CONNECTION_ISSUE, repository.currentStatus.value)
+        assertEquals(1, recorded.size)
+    }
+
+    @Test
+    fun checkNowDiscardsResultWhenCredentialsChangedMidCall() = runTest {
+        val api = FakeTwitchApiClient()
+        api.queueResult(TwitchCheckResult.Live)
+        val (historyStore, recorded) = fakeHistoryStore()
+        val repository = buildRepository(api, fakeSettingsStore(), historyStore)
+
+        api.onCall = { repository.bumpCredentialGeneration() }
+
+        repository.checkNow()
+        advanceUntilIdle()
+
+        assertEquals(StreamStatus.UNKNOWN, repository.currentStatus.value) // not applied
+        assertEquals(0, recorded.size)
+    }
 }

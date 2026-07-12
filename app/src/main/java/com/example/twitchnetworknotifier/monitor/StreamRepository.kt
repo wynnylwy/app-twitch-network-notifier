@@ -82,6 +82,23 @@ class StreamRepository(
         newStatus
     }
 
+    // Single immediate check for the Settings save flow: one API call, no
+    // retry/backoff (retries stay the background monitor's job). Applies the
+    // result via applyStatus only if no newer save happened meanwhile; the
+    // mapped status of this call is returned either way.
+    suspend fun checkNow(): StreamStatus = checkMutex.withLock {
+        val myGeneration = credentialGeneration.value
+        val settings = settingsStore.settings.first()
+        val previousStatus = _currentStatus.value
+
+        val result = apiClient.getStreamStatus(settings.channelName, settings.clientId, settings.clientSecret)
+        val newStatus = result.toStatus()
+        if (myGeneration == credentialGeneration.value) {
+            applyStatus(previousStatus, newStatus)
+        }
+        newStatus
+    }
+
     // Confirms a non-live result with retries only when leaving a healthy/unknown
     // state. Once already in a problem state, a single quick check is used.
     // Returns null when a settings save invalidated this check mid-flight: the
