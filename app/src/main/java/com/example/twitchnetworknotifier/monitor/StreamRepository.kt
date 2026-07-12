@@ -7,7 +7,6 @@ import com.example.twitchnetworknotifier.monitor.model.StatusEvent
 import com.example.twitchnetworknotifier.monitor.model.StreamStatus
 import com.example.twitchnetworknotifier.monitor.model.TwitchCheckResult
 import com.example.twitchnetworknotifier.monitor.network.TwitchApiClient
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -20,6 +19,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 
 class StreamRepository(
     private val settingsStore: SettingsStore,
@@ -71,7 +71,8 @@ class StreamRepository(
         val settings = settingsStore.settings.first()
         val previousStatus = _currentStatus.value
 
-        val result = performCheck(settings, previousStatus)
+        val result = performCheck(settings, previousStatus, myGeneration)
+            ?: return@withLock _currentStatus.value // aborted mid-retry: no-op tick
         // Stale check: newer credentials were saved while this check ran.
         // Discard silently — no status change, no history row, no alert.
         if (myGeneration != credentialGeneration.value) return@withLock _currentStatus.value
@@ -83,7 +84,13 @@ class StreamRepository(
 
     // Confirms a non-live result with retries only when leaving a healthy/unknown
     // state. Once already in a problem state, a single quick check is used.
-    private suspend fun performCheck(settings: Settings, previousStatus: StreamStatus): TwitchCheckResult {
+    // Returns null when a settings save invalidated this check mid-flight: the
+    // backoff sleep races the credentialGeneration signal and wakes immediately.
+    private suspend fun performCheck(
+        settings: Settings,
+        previousStatus: StreamStatus,
+        myGeneration: Long
+    ): TwitchCheckResult? {
         val firstResult = apiClient.getStreamStatus(settings.channelName, settings.clientId, settings.clientSecret)
         val enteringProblem = previousStatus == StreamStatus.LIVE || previousStatus == StreamStatus.UNKNOWN
         if (firstResult is TwitchCheckResult.Live || !enteringProblem) {
@@ -92,7 +99,10 @@ class StreamRepository(
 
         var lastResult = firstResult
         for (backoffMillis in RETRY_BACKOFF_MILLIS) {
-            delay(backoffMillis)
+            val invalidated = withTimeoutOrNull(backoffMillis) {
+                credentialGeneration.first { it != myGeneration }
+            } != null
+            if (invalidated) return null // abort: newer credentials saved
             lastResult = apiClient.getStreamStatus(settings.channelName, settings.clientId, settings.clientSecret)
             if (lastResult is TwitchCheckResult.Live) return lastResult
         }
