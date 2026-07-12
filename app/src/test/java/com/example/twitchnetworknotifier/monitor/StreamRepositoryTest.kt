@@ -228,4 +228,28 @@ class StreamRepositoryTest {
 
         assertEquals(StreamStatus.UNKNOWN, repository.currentStatus.value)
     }
+
+    @Test
+    fun checkOnceDiscardsResultWhenCredentialsChangedMidCheck() = runTest {
+        val api = FakeTwitchApiClient()
+        api.queueResult(TwitchCheckResult.Live)
+        val (historyStore, recorded) = fakeHistoryStore()
+        val repository = buildRepository(api, fakeSettingsStore(), historyStore)
+
+        val emitted = mutableListOf<StatusEvent>()
+        val job = launch { repository.alerts.collect { emitted.add(it) } }
+        testScheduler.runCurrent()
+
+        // Simulate a save landing while the API call is in flight.
+        api.onCall = { repository.bumpCredentialGeneration() }
+
+        val status = repository.checkOnce()
+        advanceUntilIdle()
+        job.cancel()
+
+        assertEquals(StreamStatus.UNKNOWN, status)                      // unchanged
+        assertEquals(StreamStatus.UNKNOWN, repository.currentStatus.value)
+        assertEquals(0, recorded.size)                                   // no history row
+        assertEquals(0, emitted.size)                                    // no alert
+    }
 }

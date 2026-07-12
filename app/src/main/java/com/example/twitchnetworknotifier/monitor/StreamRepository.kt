@@ -17,6 +17,9 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 class StreamRepository(
     private val settingsStore: SettingsStore,
@@ -33,6 +36,13 @@ class StreamRepository(
 
     private val _currentStatus = MutableStateFlow(StreamStatus.UNKNOWN)
     val currentStatus: StateFlow<StreamStatus> = _currentStatus.asStateFlow()
+
+    // Serializes checks so state mutations never interleave.
+    private val checkMutex = Mutex()
+
+    // Bumped on every settings save; checks that captured an older value are stale.
+    // Observable so a sleeping retry backoff can wake immediately (Task 2).
+    private val credentialGeneration = MutableStateFlow(0L)
 
     private val _alerts = MutableSharedFlow<StatusEvent>(extraBufferCapacity = 1)
     val alerts: SharedFlow<StatusEvent> = _alerts.asSharedFlow()
@@ -52,19 +62,23 @@ class StreamRepository(
         }
     }
 
-    suspend fun checkOnce(): StreamStatus {
+    fun bumpCredentialGeneration() {
+        credentialGeneration.update { it + 1 } // atomic; callable from any thread
+    }
+
+    suspend fun checkOnce(): StreamStatus = checkMutex.withLock {
+        val myGeneration = credentialGeneration.value
         val settings = settingsStore.settings.first()
         val previousStatus = _currentStatus.value
 
         val result = performCheck(settings, previousStatus)
-        val newStatus = when (result) {
-            is TwitchCheckResult.Live -> StreamStatus.LIVE
-            is TwitchCheckResult.Offline -> StreamStatus.OFFLINE
-            is TwitchCheckResult.Failure -> StreamStatus.CONNECTION_ISSUE
-        }
+        // Stale check: newer credentials were saved while this check ran.
+        // Discard silently — no status change, no history row, no alert.
+        if (myGeneration != credentialGeneration.value) return@withLock _currentStatus.value
 
+        val newStatus = result.toStatus()
         applyStatus(previousStatus, newStatus)
-        return newStatus
+        newStatus
     }
 
     // Confirms a non-live result with retries only when leaving a healthy/unknown
@@ -83,6 +97,12 @@ class StreamRepository(
             if (lastResult is TwitchCheckResult.Live) return lastResult
         }
         return lastResult
+    }
+
+    private fun TwitchCheckResult.toStatus(): StreamStatus = when (this) {
+        is TwitchCheckResult.Live -> StreamStatus.LIVE
+        is TwitchCheckResult.Offline -> StreamStatus.OFFLINE
+        is TwitchCheckResult.Failure -> StreamStatus.CONNECTION_ISSUE
     }
 
     private suspend fun applyStatus(previousStatus: StreamStatus, newStatus: StreamStatus) {
