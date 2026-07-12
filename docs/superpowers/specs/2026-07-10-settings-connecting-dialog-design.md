@@ -38,9 +38,10 @@ Give the user immediate, explicit feedback after saving new settings:
   with **no** internal retry/backoff wait. Retries are purely the background
   monitor service's job.
 - **New credentials invalidate old in-flight checks.** Saving bumps a credential
-  generation. Any check that used older credentials is discarded on completion —
-  it cannot change status, write history, or fire a notification. See
-  "Concurrency & stale-result handling" below.
+  generation. Any check that used older credentials is **aborted as soon as
+  possible** (a retry sleeping in backoff wakes and exits immediately) and is
+  discarded in any case — it cannot change status, write history, or fire a
+  notification. See "Concurrency & stale-result handling" below.
 - **Failure path fails closed.** On a failed connect, dismiss "Connecting…"
   immediately (no ~12s/70s wait), show a dismissible error dialog, and keep the
   user on Settings. The running monitor keeps polling in the background, so a
@@ -89,30 +90,52 @@ required:
    (`_currentStatus`, `problemNotificationCount`, history writes, alert
    emissions) never interleave — no double history rows, no clobbered status.
 2. **Credential-generation guard.** The repository tracks a monotonically
-   increasing `credentialGeneration` that bumps whenever settings are saved.
-   Each check captures the generation of the credentials it read. Before
-   applying its result (status update, history write, **or alert/notification
-   emission**), it verifies the captured generation is still current. If a newer
-   save has occurred, the result is **discarded silently** — no status change,
-   no history row, no notification.
+   increasing `credentialGeneration` (observable, e.g. a `MutableStateFlow`)
+   that bumps whenever settings are saved. Each check captures the generation
+   of the credentials it read. Before applying its result (status update,
+   history write, **or alert/notification emission**), it verifies the captured
+   generation is still current. If a newer save has occurred, the result is
+   **discarded silently** — no status change, no history row, no notification.
+3. **Abort-on-save (early exit).** A stale retry is not merely discarded at the
+   end — it is interrupted as soon as the save happens. The retry loop's
+   backoff sleep races the generation signal instead of sleeping blindly:
+
+   ```kotlin
+   // replaces delay(backoffMillis) in the retry loop
+   val invalidated = withTimeoutOrNull(backoffMillis) {
+       credentialGeneration.first { it != myGen }
+   } != null
+   if (invalidated) return /* stale — abort, apply nothing */
+   ```
+
+   - Backoff elapses normally → continue retrying as today.
+   - Save lands mid-sleep → the wait wakes **immediately**, the check aborts
+     without applying anything and releases the mutex, so the just-saved
+     `checkNow()` acquires it within milliseconds.
+   - The generation is also re-checked before each retry API call, so a save
+     landing during an API call aborts before the next call starts.
 
 **Net effect:** saving new credentials invalidates any in-flight
 old-credential check. The old check cannot overwrite the fresh new-credential
 result and cannot pop a stale retry notification for the old credentials. The
 new `checkNow()` result is authoritative. The two checks are never observably
-parallel — the stale one is thrown away.
+parallel — the stale one is aborted (or, at latest, thrown away at its apply
+step).
 
-Latency is explicitly a non-goal here: the priority is that the on-processing
-old retry never corrupts the new result or fires a stale notification.
+**Residual wait:** a save that lands while the old check is mid-HTTP-call
+cannot yank the socket; the abort happens right after that call returns.
+"Connecting…" therefore lasts at most roughly one API call/timeout (a few
+seconds), not the full retry backoff (~70s in production).
 
 ## Components
 
 ### `StreamRepository`
 - Add `private val checkMutex = Mutex()`.
-- Add a `credentialGeneration` counter that bumps on every settings save (e.g.
-  incremented via a `bumpCredentialGeneration()` call the save path invokes, or
-  derived from observing the settings flow). Persisted state is not required;
-  an in-memory counter is sufficient.
+- Add a `credentialGeneration` counter as a `MutableStateFlow<Long>` that bumps
+  on every settings save (incremented via a `bumpCredentialGeneration()` call
+  the save path invokes). A `StateFlow` (not a plain counter) so the retry
+  loop's backoff sleep can race it and wake immediately on save. Persisted
+  state is not required; in-memory is sufficient.
 - Add `suspend fun checkNow(): StreamStatus` — bumps/reads the generation for
   the just-saved credentials, reads current settings, performs a **single**
   `apiClient.getStreamStatus(...)` call (no `performCheck` retry loop), maps the
@@ -121,6 +144,11 @@ old retry never corrupts the new result or fires a stale notification.
 - Wrap the existing `checkOnce()` body in `checkMutex.withLock { ... }` and add
   the same generation check before it applies its result, so a stale
   old-credential loop check is discarded once new credentials are saved.
+- In `performCheck()`'s retry loop, replace `delay(backoffMillis)` with the
+  interruptible race shown above, and re-check the generation before each retry
+  API call. On invalidation the check aborts and applies nothing — `checkOnce()`
+  returns the current (unchanged) status, writes no history, emits no alert —
+  and the service loop simply continues on its normal interval.
 - `checkOnce()` (with retry/backoff) otherwise remains the method the background
   service loop calls; its behavior is unchanged for the current-generation case.
 
@@ -179,3 +207,7 @@ old retry never corrupts the new result or fires a stale notification.
     emitted. (Simulate by bumping the generation between a check's API call and
     its apply step, e.g. via a fake API client that saves/generation-bumps
     mid-call.)
+  - **Abort-on-save:** with a check sleeping in retry backoff (use a test
+    dispatcher / virtual time), bumping the generation wakes it immediately —
+    the check exits without further API calls and applies nothing, and a
+    subsequent `checkNow()` is not blocked for the remainder of the backoff.
