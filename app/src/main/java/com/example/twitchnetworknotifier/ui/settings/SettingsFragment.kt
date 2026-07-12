@@ -1,6 +1,8 @@
 package com.example.twitchnetworknotifier.ui.settings
 
+import android.app.AlertDialog
 import android.os.Bundle
+import android.os.CountDownTimer
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -10,7 +12,10 @@ import androidx.fragment.app.viewModels
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import androidx.navigation.fragment.findNavController
+import com.example.twitchnetworknotifier.R
 import com.example.twitchnetworknotifier.databinding.FragmentSettingsBinding
+import com.example.twitchnetworknotifier.ui.settings.SettingsViewModel.SaveFlowState
 import kotlinx.coroutines.launch
 
 class SettingsFragment : Fragment() {
@@ -19,6 +24,9 @@ class SettingsFragment : Fragment() {
     private val binding get() = _binding!!
 
     private val viewModel: SettingsViewModel by viewModels()
+
+    private var flowDialog: AlertDialog? = null
+    private var countdownTimer: CountDownTimer? = null
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -65,6 +73,12 @@ class SettingsFragment : Fragment() {
             }
         }
 
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.saveFlowState.collect { state -> renderSaveFlowState(state) }
+            }
+        }
+
         binding.buttonSave.setOnClickListener {
             viewModel.save(
                 channelName = binding.editChannelName.text.toString(),
@@ -74,7 +88,64 @@ class SettingsFragment : Fragment() {
         }
     }
 
+    // Dialogs are derived from state so a configuration change re-shows the
+    // right dialog (the countdown restarting on rotation is accepted).
+    private fun renderSaveFlowState(state: SaveFlowState) {
+        clearFlowDialog()
+        when (state) {
+            SaveFlowState.Idle -> Unit
+            SaveFlowState.Connecting -> {
+                flowDialog = AlertDialog.Builder(requireContext())
+                    .setMessage(R.string.dialog_connecting)
+                    .setCancelable(false)
+                    .show()
+            }
+            SaveFlowState.Connected -> showConnectedCountdown()
+            SaveFlowState.ConnectFailed -> {
+                flowDialog = AlertDialog.Builder(requireContext())
+                    .setTitle(R.string.dialog_connect_failed_title)
+                    .setMessage(R.string.dialog_connect_failed_message)
+                    .setCancelable(false)
+                    .setPositiveButton(R.string.dialog_ok) { _, _ ->
+                        viewModel.acknowledgeConnectFailed()
+                    }
+                    .show()
+            }
+        }
+    }
+
+    private fun showConnectedCountdown() {
+        val dialog = AlertDialog.Builder(requireContext())
+            .setTitle(R.string.dialog_connected_title)
+            .setMessage(getString(R.string.dialog_connected_countdown, 3))
+            .setCancelable(false)
+            .show()
+        flowDialog = dialog
+
+        countdownTimer = object : CountDownTimer(3_000L, 1_000L) {
+            override fun onTick(millisUntilFinished: Long) {
+                val secondsLeft = ((millisUntilFinished + 999) / 1_000).toInt()
+                dialog.setMessage(getString(R.string.dialog_connected_countdown, secondsLeft))
+            }
+
+            override fun onFinish() {
+                // Reset state BEFORE navigating so a re-render can't pop twice.
+                viewModel.onConnectedNavigationHandled()
+                clearFlowDialog()
+                findNavController().popBackStack()
+            }
+        }.start()
+    }
+
+    private fun clearFlowDialog() {
+        countdownTimer?.cancel()
+        countdownTimer = null
+        flowDialog?.dismiss()
+        flowDialog = null
+    }
+
     override fun onDestroyView() {
+        clearFlowDialog()
         super.onDestroyView()
         _binding = null
     }
