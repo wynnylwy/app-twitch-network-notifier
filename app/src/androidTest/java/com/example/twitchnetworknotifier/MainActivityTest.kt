@@ -4,6 +4,7 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.action.ViewActions.click
 import androidx.test.espresso.assertion.ViewAssertions.matches
+import androidx.test.espresso.matcher.ViewMatchers.isChecked
 import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
 import androidx.test.espresso.matcher.ViewMatchers.withId
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -29,12 +30,15 @@ class MainActivityTest {
     fun tappingSettingsTabSwitchesScreenAndBack() {
         ActivityScenario.launch(MainActivity::class.java).use {
             onView(withId(R.id.switch_monitoring)).check(matches(isDisplayed()))
+            onView(withId(R.id.mainFragment)).check(matches(isChecked()))
 
             onView(withId(R.id.settingsFragment)).perform(click())
             onView(withId(R.id.edit_channel_name)).check(matches(isDisplayed()))
+            onView(withId(R.id.settingsFragment)).check(matches(isChecked()))
 
             onView(withId(R.id.mainFragment)).perform(click())
             onView(withId(R.id.switch_monitoring)).check(matches(isDisplayed()))
+            onView(withId(R.id.mainFragment)).check(matches(isChecked()))
         }
     }
 
@@ -44,10 +48,12 @@ class MainActivityTest {
             onView(withId(R.id.mainFragment)).perform(click())
             onView(withId(R.id.mainFragment)).perform(click())
             onView(withId(R.id.switch_monitoring)).check(matches(isDisplayed()))
+            onView(withId(R.id.mainFragment)).check(matches(isChecked()))
 
             onView(withId(R.id.settingsFragment)).perform(click())
             onView(withId(R.id.settingsFragment)).perform(click())
             onView(withId(R.id.edit_channel_name)).check(matches(isDisplayed()))
+            onView(withId(R.id.settingsFragment)).check(matches(isChecked()))
         }
     }
 }
