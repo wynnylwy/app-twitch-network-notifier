@@ -59,11 +59,13 @@ class MainFragmentTest {
     }
 
     @Test
-    fun historyListRendersSeededEvents() = runBlocking {
+    fun historyListRendersSeededEvents() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val historyStore = HistoryStore(context)
-        historyStore.addEvent(StatusEvent(1_000L, StreamStatus.UNKNOWN, StreamStatus.LIVE))
-        historyStore.addEvent(StatusEvent(2_000L, StreamStatus.LIVE, StreamStatus.OFFLINE))
+        runBlocking {
+            historyStore.addEvent(StatusEvent(1_000L, StreamStatus.UNKNOWN, StreamStatus.LIVE))
+            historyStore.addEvent(StatusEvent(2_000L, StreamStatus.LIVE, StreamStatus.OFFLINE))
+        }
 
         launchFragmentInContainer<MainFragment>(themeResId = R.style.Theme_TwitchNetworkNotifier)
 

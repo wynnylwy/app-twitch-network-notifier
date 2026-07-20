@@ -15,7 +15,8 @@ import kotlinx.coroutines.launch
 class StreamMonitorService : LifecycleService() {
 
     companion object {
-        private const val CHECK_INTERVAL_MILLIS = 2 * 60 * 1000L
+        // TODO: TEMP for testing — restore to 2 * 60 * 1000L before shipping.
+        private const val CHECK_INTERVAL_MILLIS = 5 * 1000L
         private const val EXTRA_SHOW_WELCOME = "show_welcome"
 
         fun start(context: Context, showWelcome: Boolean) {

@@ -9,9 +9,11 @@ import com.example.twitchnetworknotifier.monitor.model.TwitchCheckResult
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
 import kotlin.test.assertEquals
@@ -227,5 +229,103 @@ class StreamRepositoryTest {
         repository.setMonitoringEnabled(false)
 
         assertEquals(StreamStatus.UNKNOWN, repository.currentStatus.value)
+    }
+
+    @Test
+    fun checkOnceDiscardsResultWhenCredentialsChangedMidCheck() = runTest {
+        val api = FakeTwitchApiClient()
+        api.queueResult(TwitchCheckResult.Live)
+        val (historyStore, recorded) = fakeHistoryStore()
+        val repository = buildRepository(api, fakeSettingsStore(), historyStore)
+
+        val emitted = mutableListOf<StatusEvent>()
+        val job = launch { repository.alerts.collect { emitted.add(it) } }
+        testScheduler.runCurrent()
+
+        // Simulate a save landing while the API call is in flight.
+        api.onCall = { repository.bumpCredentialGeneration() }
+
+        val status = repository.checkOnce()
+        advanceUntilIdle()
+        job.cancel()
+
+        assertEquals(StreamStatus.UNKNOWN, status)                      // unchanged
+        assertEquals(StreamStatus.UNKNOWN, repository.currentStatus.value)
+        assertEquals(0, recorded.size)                                   // no history row
+        assertEquals(0, emitted.size)                                    // no alert
+    }
+
+    @Test
+    fun savingDuringRetryBackoffAbortsCheckImmediately() = runTest {
+        val api = FakeTwitchApiClient()
+        repeat(4) { api.queueResult(TwitchCheckResult.Failure("bad creds")) }
+        val (historyStore, recorded) = fakeHistoryStore()
+        val repository = buildRepository(api, fakeSettingsStore(), historyStore)
+
+        val emitted = mutableListOf<StatusEvent>()
+        val collector = launch { repository.alerts.collect { emitted.add(it) } }
+        testScheduler.runCurrent()
+
+        val check = async { repository.checkOnce() }
+        testScheduler.runCurrent() // first API call fails; now sleeping in backoff
+
+        repository.bumpCredentialGeneration() // user saves new credentials
+        testScheduler.runCurrent()            // wakes WITHOUT advancing virtual time
+        collector.cancel()
+
+        assertEquals(StreamStatus.UNKNOWN, check.await()) // aborted: status unchanged
+        assertEquals(1, api.callCount)                     // no further retry calls
+        assertEquals(0, recorded.size)                     // no history row
+        assertEquals(0, emitted.size)                      // no stale notification
+        assertEquals(0L, currentTime)                      // woke instantly, not after backoff
+    }
+
+    @Test
+    fun checkNowUsesSingleCallAndRecordsTransition() = runTest {
+        val api = FakeTwitchApiClient()
+        api.queueResult(TwitchCheckResult.Offline) // would trigger retries in checkOnce
+        val (historyStore, recorded) = fakeHistoryStore()
+        val repository = buildRepository(api, fakeSettingsStore(), historyStore, clock = { 7_000L })
+
+        val status = repository.checkNow()
+        advanceUntilIdle()
+
+        assertEquals(StreamStatus.OFFLINE, status)
+        assertEquals(1, api.callCount) // single call, NO retry/backoff
+        assertEquals(1, recorded.size)
+        assertEquals(StreamStatus.UNKNOWN, recorded[0].fromState)
+        assertEquals(StreamStatus.OFFLINE, recorded[0].toState)
+    }
+
+    @Test
+    fun checkNowDoesNotDuplicateHistoryWhenStatusUnchanged() = runTest {
+        val api = FakeTwitchApiClient()
+        api.queueResult(TwitchCheckResult.Failure("bad"))
+        api.queueResult(TwitchCheckResult.Failure("still bad"))
+        val (historyStore, recorded) = fakeHistoryStore()
+        val repository = buildRepository(api, fakeSettingsStore(), historyStore)
+
+        repository.checkNow() // UNKNOWN -> CONNECTION_ISSUE: one row
+        repository.checkNow() // repeated failure: no new row
+        advanceUntilIdle()
+
+        assertEquals(StreamStatus.CONNECTION_ISSUE, repository.currentStatus.value)
+        assertEquals(1, recorded.size)
+    }
+
+    @Test
+    fun checkNowDiscardsResultWhenCredentialsChangedMidCall() = runTest {
+        val api = FakeTwitchApiClient()
+        api.queueResult(TwitchCheckResult.Live)
+        val (historyStore, recorded) = fakeHistoryStore()
+        val repository = buildRepository(api, fakeSettingsStore(), historyStore)
+
+        api.onCall = { repository.bumpCredentialGeneration() }
+
+        repository.checkNow()
+        advanceUntilIdle()
+
+        assertEquals(StreamStatus.UNKNOWN, repository.currentStatus.value) // not applied
+        assertEquals(0, recorded.size)
     }
 }

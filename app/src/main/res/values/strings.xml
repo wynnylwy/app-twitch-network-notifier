@@ -21,8 +21,15 @@
     <string name="dialog_toggle_off_title">You sure to off monitoring?</string>
     <string name="dialog_yes">Yes</string>
     <string name="dialog_no">No</string>
+    <string name="dialog_connecting">Connecting…</string>
+    <string name="dialog_connected_title">Connected</string>
+    <string name="dialog_connected_countdown">Returning to Home in %1$d…</string>
+    <string name="dialog_connect_failed_title">Could not connect</string>
+    <string name="dialog_connect_failed_message">Could not connect — check your credentials.</string>
+    <string name="dialog_ok">OK</string>
     <string name="settings_channel_name_hint">Twitch channel name</string>
     <string name="settings_client_id_hint">Client ID</string>
     <string name="settings_client_secret_hint">Client Secret</string>
     <string name="settings_save">Save</string>
+    <string name="settings_version">VER. %1$s</string>
 </resources>
